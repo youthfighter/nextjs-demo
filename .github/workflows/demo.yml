@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-		# 定义job运行环境，使用linux环境
+    # 定义job运行环境，使用linux环境
     runs-on: ubuntu-latest
     strategy:
       matrix:
