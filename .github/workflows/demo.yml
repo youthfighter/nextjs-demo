@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [ docker-master, docker-develop ]
 
+env:
+  # 自定义的镜像基础名称
+  BASE_IMAGE_NAME: nextjs_demo
+  # 需登陆自己的阿里云OSS服务，查询节点地址
+  OSS_END_POINT: oss-cn-beijing.aliyuncs.com
+
 jobs:
   build:
     # 定义job运行环境，使用linux环境
@@ -20,17 +26,17 @@ jobs:
     - name: Set env to production
       if: endsWith(github.ref, '/docker-master')
       run: |
-        echo "DOCKER_PORT=3000" >> $GITHUB_ENV
-        echo "WEB_DOCKER_NAME=${{ secrets.WEB_DOCKER_NAME}}" >> $GITHUB_ENV
-        echo "WEB_DOCKER_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/youthfighter/${{ secrets.WEB_DOCKER_NAME}}_stage:${{ github.sha }}" >> $GITHUB_ENV
+        echo "DOCKER_PORT=3003" >> $GITHUB_ENV
+        echo "IMAGE_NAME=${{ env.BASE_IMAGE_NAME}}" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/youthfighter/${{ env.BASE_IMAGE_NAME}}:${{ github.sha }}" >> $GITHUB_ENV
     
     # 定义测试环境的环境变量，只在develop分支执行
     - name: Set env to staging
       if: endsWith(github.ref, '/docker-develop')
       run: |
-        echo "DOCKER_PORT=3001" >> $GITHUB_ENV
-        echo "WEB_DOCKER_NAME=${{ secrets.WEB_DOCKER_NAME}}_stage" >> $GITHUB_ENV
-        echo "WEB_DOCKER_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/youthfighter/${{ secrets.WEB_DOCKER_NAME}}:${{ github.sha }}" >> $GITHUB_ENV
+        echo "DOCKER_PORT=3004" >> $GITHUB_ENV
+        echo "IMAGE_NAME=${{ env.BASE_IMAGE_NAME}}_stage" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/youthfighter/${{ env.BASE_IMAGE_NAME}}_stage:${{ github.sha }}" >> $GITHUB_ENV
     
     # 对应第2步，拉取指定分支代码
     - name: Fetch code
@@ -53,8 +59,7 @@ jobs:
     - name: Set up OSS
       uses: manyuanrong/setup-ossutil@v2.0
       with:
-        # 需登陆自己的阿里云OSS服务，查询节点地址
-        endpoint: "oss-cn-beijing.aliyuncs.com"
+        endpoint: ${{ env.OSS_END_POINT }}
         access-key-id: ${{ secrets.OSS_ACCESS_KEY }}
         access-key-secret: ${{ secrets.OSS_ACCESS_SECRET }}
 
@@ -80,7 +85,7 @@ jobs:
       with:
         context: ./
         push: true
-        tags: ${{ env.WEB_DOCKER_TAG }}
+        tags: ${{ env.IMAGE_TAG }}
       
     # 对应第6步，登录服务器
     - name: Server Start
@@ -93,7 +98,7 @@ jobs:
         # 第3、4行脚本对应第8步，删除原有后端服务，使用新镜像部署新的后端服务
         script: |
           echo ${{ secrets.ALI_DOCKER_PASSWORD }} | docker login --username ${{ secrets.ALI_DOCKER_USERNAME }} --password-stdin ${{ secrets.ALI_DOCKER_REGISTRY }}
-          docker pull ${{ env.WEB_DOCKER_TAG }}
-          docker container stop ${{ env.WEB_DOCKER_NAME}} || echo "停止容器[${{ env.WEB_DOCKER_NAME}}]异常"
-          docker container rm ${{ env.WEB_DOCKER_NAME}} || echo "删除容器[${{ env.WEB_DOCKER_NAME}}]异常"
-          docker container run -p ${{ env.DOCKER_PORT }}:3000 -d --name ${{ env.WEB_DOCKER_NAME}} -it ${{ env.WEB_DOCKER_TAG }}
+          docker pull ${{ env.IMAGE_TAG }}
+          docker container stop ${{ env.IMAGE_NAME}} || echo "停止容器[${{ env.IMAGE_NAME}}]异常"
+          docker container rm ${{ env.IMAGE_NAME}} || echo "删除容器[${{ env.IMAGE_NAME}}]异常"
+          docker container run -p ${{ env.DOCKER_PORT }}:3000 -d --name ${{ env.IMAGE_NAME}} -it ${{ env.IMAGE_TAG }}
