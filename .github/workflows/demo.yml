@@ -4,9 +4,8 @@ name: build-and-deploy-nextjs
 # 对应第1步，master代码变动执行该workflow
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches:
+      - master
 
 jobs:
   build-and-deploy:
