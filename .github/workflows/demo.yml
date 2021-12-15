@@ -5,9 +5,6 @@ on:
   push:
     branches: 
       - docker-master
-  pull_request:
-    branches:
-      - docker-master
 
 env:
   # docker仓库的命名空间，可进入容器镜像服务/实例列表/命名空间查看
