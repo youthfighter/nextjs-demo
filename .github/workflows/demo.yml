@@ -42,7 +42,7 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        cache-dependency-path: "package-lock.json"
+        cache-dependency-path: "./package-lock.json"
     
     # 对应第3步，执行打包命令
     - name: 'Build Front'
