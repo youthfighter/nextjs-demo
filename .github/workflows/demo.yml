@@ -1,52 +1,108 @@
-# workflow名称
 name: build-and-deploy-nextjs
 
-# 对应第1步，master代码变动执行该workflow
+# 对应第1步，docker-master和docker-develop分支代码变动执行该workflow
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
+    branches: 
+      - docker-master
+      - docker-develop
+
+env:
+  # docker仓库的命名空间，可进入容器镜像服务/实例列表/命名空间查看
+  DOCKER_NAMESPACE: youthfighter
+  # 自定义的镜像基础名称
+  BASE_IMAGE_NAME: nextjs_demo
+  # 可以通过 对象存储/Bucket列表 新建或者查看bucket
+  OSS_BUCKET: youthfighter
+  # 可以通过 对象存储/Bucket列表/[对应bucket名称]/概览 来查看
+  OSS_END_POINT: oss-cn-beijing.aliyuncs.com
 
 jobs:
-  build-and-deploy:
+  build:
     # 定义job运行环境，使用linux环境
     runs-on: ubuntu-latest
-    steps:
-    # 对应第2步，借助已有脚本拉取代码
-    - name: Checkout
-      uses: actions/checkout@master
-      
-    # 第3步的准备工作，先配置好node环境
-    - uses: actions/setup-node@v2
-      with:
-        node-version: '14'
+    strategy:
+      matrix:
+        node-version: [14.x]
 
+    steps:
+    # 定义生产环境的环境变量，只在master分支执行
+    - name: Set env to production
+      if: endsWith(github.ref, '/docker-master')
+      run: |
+        echo "DOCKER_PORT=3003" >> $GITHUB_ENV
+        echo "IMAGE_NAME=${{ env.BASE_IMAGE_NAME}}" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/${{ env.DOCKER_NAMESPACE }}/${{ env.BASE_IMAGE_NAME}}:${{ github.sha }}" >> $GITHUB_ENV
+    
+    # 定义测试环境的环境变量，只在develop分支执行
+    - name: Set env to staging
+      if: endsWith(github.ref, '/docker-develop')
+      run: |
+        echo "DOCKER_PORT=3004" >> $GITHUB_ENV
+        echo "IMAGE_NAME=${{ env.BASE_IMAGE_NAME}}_stage" >> $GITHUB_ENV
+        echo "IMAGE_TAG=${{ secrets.ALI_DOCKER_REGISTRY }}/${{ env.DOCKER_NAMESPACE }}/${{ env.BASE_IMAGE_NAME}}_stage:${{ github.sha }}" >> $GITHUB_ENV
+    
+    # 对应第2步，拉取指定分支代码
+    - name: Fetch code
+      uses: actions/checkout@v2
+    
+    # 第3步的准备工作，先配置好node环境
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v2
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+    
     # 对应第3步，执行打包命令
-    - name: 'Build'
+    - name: 'Build Front'
       run: |
         npm i
         npm run build
-        
-    # 对应第4、5步，配置参数登陆服务器+拷贝到指定目录
-    - name: Upload
-      uses: appleboy/scp-action@master
-      with: 
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USERNAME }}
-        key: ${{ secrets.PRIVATE_KEY }}
-        # 拷贝 .next、public文件夹和package.json文件到服务器指定目录
-        source: ".next/,public/,package.json"
-        target: "/nextjs-demo"
+ 
+    # 第4步的准备工作，登陆OSS
+    - name: Set up OSS
+      uses: manyuanrong/setup-ossutil@v2.0
+      with:
+        endpoint: ${{ env.OSS_END_POINT }}
+        access-key-id: ${{ secrets.OSS_ACCESS_KEY }}
+        access-key-secret: ${{ secrets.OSS_ACCESS_SECRET }}
+
+    # 对应第4步，上传前端资源到阿里云 OSS
+    - name: Upload to OSS
+      run: ossutil cp -r .next/static/ oss://${{ env.OSS_BUCKET }}/_next/static
+      
+    # 第5步的准备工作，设置docker环境
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
     
-    # 对应第6步，重启安装依赖、后端服务2
-    - name: Server Reload
+    # 第5步的准备工作，登陆阿里云docker仓库
+    - name: Login to Ali Docker
+      uses: docker/login-action@v1
+      with:
+        registry: ${{ secrets.ALI_DOCKER_REGISTRY }}
+        username: ${{ secrets.ALI_DOCKER_USERNAME }}
+        password: ${{ secrets.ALI_DOCKER_PASSWORD }}
+    
+    # 对应第5步，构建 docker 镜像，并上传到阿里云镜像服务
+    - name: Build and push Docker Image
+      uses: docker/build-push-action@v2
+      with:
+        context: ./
+        push: true
+        tags: ${{ env.IMAGE_TAG }}
+      
+    # 对应第6步，登录服务器
+    - name: Server Start
       uses: appleboy/ssh-action@master
       with: 
         host: ${{ secrets.REMOTE_HOST }}
         username: ${{ secrets.REMOTE_USERNAME }}
         key: ${{ secrets.PRIVATE_KEY }}
+        # 第1、2行脚本对应第7步，服务器登陆阿里云 docker 仓库，下载目标 docker 镜像
+        # 第3、4行脚本对应第8步，删除原有后端服务，使用新镜像部署新的后端服务
         script: |
-          cd /nextjs-demo
-          npm i
-          pm2 reload nextjs-demo
+          echo ${{ secrets.ALI_DOCKER_PASSWORD }} | docker login --username ${{ secrets.ALI_DOCKER_USERNAME }} --password-stdin ${{ secrets.ALI_DOCKER_REGISTRY }}
+          docker pull ${{ env.IMAGE_TAG }}
+          docker container stop ${{ env.IMAGE_NAME}} || echo "停止容器[${{ env.IMAGE_NAME}}]异常"
+          docker container rm ${{ env.IMAGE_NAME}} || echo "删除容器[${{ env.IMAGE_NAME}}]异常"
+          docker container run -p ${{ env.DOCKER_PORT }}:3000 -d --name ${{ env.IMAGE_NAME}} -it ${{ env.IMAGE_TAG }}
