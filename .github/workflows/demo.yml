@@ -1,10 +1,11 @@
-name: frontend web publish
+name: frontend web publish1
 
 # 对应第1步，docker-master和docker-develop分支代码变动执行该workflow
 on:
   push:
     branches: 
       - docker-master
+      - docker-develop
 
 env:
   # docker仓库的命名空间，可进入容器镜像服务/实例列表/命名空间查看
